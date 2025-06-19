@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GPT_API_KEY = os.getenv("OPENROUTER_API_KEY")
+AUTHORIZED_USERS_ENV = os.getenv("AUTHORIZED_USERS", "")
+AUTHORIZED_USERS = [int(uid) for uid in AUTHORIZED_USERS_ENV.split(',') if uid]
 
 # In-memory storage for collected data
 user_data: dict[str, any] = {}
@@ -51,7 +53,6 @@ MATERIALS = {
     },
 }
 
-AUTHORIZED_USERS = [123456789]  # replace with your user_id
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -291,21 +292,20 @@ async def send_pdf_from_history(update: Update, context: ContextTypes.DEFAULT_TY
         await query.message.reply_text("PDF файл не знайдено. Можливо, його було видалено.")
 
 
-async def main() -> None:
+def main() -> None:
     if BOT_TOKEN is None:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    application.add_handler(CommandHandler("історія", show_history))
+    # Telegram commands must use ASCII, so we expose history under /history
+    application.add_handler(CommandHandler("history", show_history))
     application.add_handler(CommandHandler("ask_gpt", ask_gpt))
     application.add_handler(CallbackQueryHandler(send_pdf_from_history, pattern=r"^get_\d+$"))
     application.add_handler(handler)
 
-    await application.run_polling()
+    application.run_polling()
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+    main()
