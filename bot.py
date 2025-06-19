@@ -21,8 +21,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GPT_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# In-memory storage for collected data
-user_data: dict[str, any] = {}
 
 # Default work types and prices
 WORK_PRICES = {
@@ -58,6 +56,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in AUTHORIZED_USERS:
         await update.message.reply_text("⛔️ Доступ заборонено. Зверніться до адміністратора.")
         return ConversationHandler.END
+    context.user_data.clear()
     await update.message.reply_text(
         "Вітаю! Давайте створимо акт виконаних робіт.\n\nЯк звати замовника?"
     )
@@ -65,13 +64,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ask_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data["name"] = update.message.text
+    context.user_data["name"] = update.message.text
     await update.message.reply_text("Вкажіть адресу виконання робіт:")
     return ASK_ADDRESS
 
 
 async def ask_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data["address"] = update.message.text
+    context.user_data["address"] = update.message.text
     keyboard = [["Сьогодні", "Ввести вручну"]]
     await update.message.reply_text(
         "Вкажіть дату виконання робіт:",
@@ -83,10 +82,10 @@ async def ask_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def collect_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "Сьогодні":
-        user_data["date"] = datetime.now().strftime("%d.%m.%Y")
+        context.user_data["date"] = datetime.now().strftime("%d.%m.%Y")
     else:
-        user_data["date"] = text
-    user_data["works"] = {}
+        context.user_data["date"] = text
+    context.user_data["works"] = {}
     keyboard = [[InlineKeyboardButton(w, callback_data=w)] for w in WORK_PRICES]
     await update.message.reply_text(
         "Оберіть види робіт (по одному):",
@@ -99,7 +98,7 @@ async def collect_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     work_type = query.data
-    user_data["current_work"] = work_type
+    context.user_data["current_work"] = work_type
     await query.message.reply_text(f"Скільки одиниць роботи: '{work_type}'?")
     return CONFIRMATION
 
@@ -110,8 +109,8 @@ async def save_work_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введіть кількість цифрою.")
         return CONFIRMATION
 
-    work = user_data.get("current_work")
-    user_data["works"][work] = int(qty)
+    work = context.user_data.get("current_work")
+    context.user_data["works"][work] = int(qty)
 
     keyboard = [[InlineKeyboardButton(w, callback_data=w)] for w in WORK_PRICES]
     keyboard.append([InlineKeyboardButton("✅ Завершити", callback_data="done")])
@@ -127,12 +126,12 @@ async def finish_collection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     summary = "🧾 Акт виконаних робіт\n"
-    summary += f"Дата: {user_data['date']}\n"
-    summary += f"Замовник: {user_data['name']}\n"
-    summary += f"Адреса: {user_data['address']}\n\n"
+    summary += f"Дата: {context.user_data['date']}\n"
+    summary += f"Замовник: {context.user_data['name']}\n"
+    summary += f"Адреса: {context.user_data['address']}\n\n"
 
     total = 0
-    for w, q in user_data["works"].items():
+    for w, q in context.user_data["works"].items():
         price = WORK_PRICES[w]
         cost = price * q
         total += cost
@@ -142,8 +141,8 @@ async def finish_collection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     materials_cost = 0
     for mat, props in MATERIALS.items():
         work_key = props["related_to"]
-        if work_key in user_data["works"]:
-            qty = user_data["works"][work_key] * props["rate"]
+        if work_key in context.user_data["works"]:
+            qty = context.user_data["works"][work_key] * props["rate"]
             if "price_per_kg" in props:
                 cost = round(qty * props["price_per_kg"])
                 summary += f"{mat}: {qty:.1f} кг × {props['price_per_kg']} = {cost} грн\n"
@@ -169,10 +168,10 @@ async def finish_collection(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     history_file = "history.json"
     record = {
-        "date": user_data["date"],
-        "name": user_data["name"],
-        "address": user_data["address"],
-        "works": user_data["works"],
+        "date": context.user_data["date"],
+        "name": context.user_data["name"],
+        "address": context.user_data["address"],
+        "works": context.user_data["works"],
         "total": total,
         "materials_total": materials_cost,
         "grand_total": grand_total,
@@ -190,11 +189,14 @@ async def finish_collection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("Помилка збереження історії:", e)
 
+    context.user_data.clear()
+
     return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Скасовано.", reply_markup=ReplyKeyboardRemove())
+    context.user_data.clear()
     return ConversationHandler.END
 
 
